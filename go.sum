@@ -1,0 +1,8 @@
+github.com/zzl/go-com v1.5.0 h1:ANiyOsvP1XfUugoZBIvCbvqh+Ns1DLSJ9lBF1zgHSak=
+github.com/zzl/go-com v1.5.0/go.mod h1:Q0gh9d2jtlY//GbUXVPD+dzc0te32p3cetGM6am2Ooo=
+github.com/zzl/go-webview2 v0.0.0-20230129130204-9df4a7d166d5 h1:Mm+0i/j1ox9c8kdXiD5DVzIjJyeh8P4muSqhBLowDxk=
+github.com/zzl/go-webview2 v0.0.0-20230129130204-9df4a7d166d5/go.mod h1:qAmcqRFYi+H7bJj+KzuQM3Vm453/6c1IqgmvzyUFCXA=
+github.com/zzl/go-win32api/v2 v2.0.1 h1:SHeKZMcYqQNIxbZefuUffM3K+YuJ/WMhd8ZHr40M0OM=
+github.com/zzl/go-win32api/v2 v2.0.1/go.mod h1:doi6ewHPdh9tDmqe837Ro7IwqtB9yE+1fC8suK/Ssj0=
+golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

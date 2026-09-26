@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi Code 用量明细</title>
+<style>
+  /* ---- 设计 token（对齐 kimi-usage-tracker src/styles.css） ---- */
+  :root {
+    color-scheme: light;
+    --background:#f5f6f8; --foreground:#1c2330;
+    --card:#ffffff; --card-foreground:#1c2330;
+    --muted:#eef0f4; --muted-foreground:#68707f;
+    --border:rgb(16 24 40 / 0.07);
+    --primary:#2563eb;
+    --green:#047857; --teal:#0f766e; --orange:#c2410c; --amber:#b45309; --red:#b91c1c; --blue:#2563eb;
+    --radius-card:16px; --radius-pop:12px; --radius-control:9px;
+    --shadow-card:0 1px 2px rgb(0 0 0/.04), 0 4px 16px rgb(0 0 0/.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --background:#0b0f14; --foreground:#e6ebf2;
+      --card:#131922; --card-foreground:#e6ebf2;
+      --muted:#1a2230; --muted-foreground:#8b96a5;
+      --border:rgb(255 255 255 / 0.06);
+      --primary:#3b82f6;
+      --green:#34d399; --teal:#2dd4bf; --orange:#fb923c; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa;
+      --shadow-card:none;
+    }
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; background:var(--background); color:var(--foreground); padding:20px; }
+  h1 { font-size:18px; font-weight:600; margin-bottom:16px; }
+
+  /* 实时卡 */
+  #live { position:sticky; top:0; z-index:5; padding-bottom:12px; margin-bottom:4px; }
+  #live::after { content:""; display:block; height:1px; background:var(--border); margin-top:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+
+  /* 卡片：大圆角 + 极轻 diffuse 阴影（对齐 tracker --shadow-card） */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px 16px; box-shadow:var(--shadow-card); }
+  .card .label { font-size:12px; color:var(--muted-foreground); }
+  .card .value { font-size:22px; font-weight:600; margin-top:6px; letter-spacing:-.01em; }
+  .card .sub { font-size:12px; color:var(--muted-foreground); margin-top:4px; min-height:14px; }
+
+  /* 订阅额度卡：两个配额窗口（7d/5h）并排，竖线分隔，各自带进度条/剩余量/倒计时 */
+  .quota-windows { display:flex; align-items:stretch; min-height:44px; margin-top:8px; }
+  .qwin { flex:1; min-width:0; }
+  .qwin:not(:first-child) { border-left:1px solid var(--border); padding-left:14px; margin-left:14px; }
+  .qwin-head { display:flex; align-items:baseline; justify-content:space-between; }
+  .qwin-label { font-size:12px; color:var(--muted-foreground); font-weight:500; }
+  .qwin-pct { font-size:20px; font-weight:600; letter-spacing:-.01em; }
+  .qwin.ok .qwin-pct { color:var(--green); }
+  .qwin.warn .qwin-pct { color:var(--amber); }
+  .qwin.danger .qwin-pct { color:var(--red); }
+  .bar { height:5px; border-radius:3px; background:var(--muted); overflow:hidden; margin-top:6px; }
+  .bar-fill { height:100%; border-radius:3px; transition:width .4s ease; }
+  .qwin.ok .bar-fill { background:var(--green); }
+  .qwin.warn .bar-fill { background:var(--amber); }
+  .qwin.danger .bar-fill { background:var(--red); }
+  .qwin-meta { display:flex; justify-content:space-between; gap:4px; font-size:11px; color:var(--muted-foreground); margin-top:4px; white-space:nowrap; }
+
+  /* 语义色值（对齐 tracker：blue=输入 orange=输出 green=缓存读 teal=缓存写） */
+  .v-in { color:var(--blue); } .v-out { color:var(--orange); }
+  .v-cache { color:var(--green); } .v-write { color:var(--teal); }
+  .v-plain { color:var(--foreground); } .warn { color:var(--red); font-size:12px; }
+
+  /* 时间范围胶囊分段控制器（对齐 tracker ToggleGroup） */
+  .seg { display:inline-flex; align-items:center; gap:2px; padding:3px; background:var(--muted); border-radius:999px; margin-bottom:16px; }
+  .seg-btn { padding:5px 14px; font-size:12px; font-weight:500; color:var(--muted-foreground); background:transparent; border:0; border-radius:999px; cursor:pointer; transition:color .15s, background .15s; }
+  .seg-btn:hover { color:var(--foreground); }
+  .seg-btn.on { background:var(--card); color:var(--foreground); box-shadow:0 1px 2px rgb(0 0 0/.06); }
+
+  /* 工具栏：时间档（左）+ 刷新按钮/频率组（右），两端对齐 */
+  .toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  .toolbar .seg { margin-bottom:0; }
+  .toolbar-right { display:flex; align-items:center; gap:8px; }
+  .btn-refresh { padding:6px 16px; font-size:12px; font-weight:600; color:#fff; background:var(--primary); border:0; border-radius:999px; cursor:pointer; transition:filter .15s, transform .1s; }
+  .btn-refresh:hover { filter:brightness(1.08); }
+  .btn-refresh:active { transform:translateY(1px); }
+  .btn-refresh:disabled { opacity:.6; cursor:default; }
+  .btn-freq { padding:6px 14px; font-size:12px; font-weight:500; color:var(--muted-foreground); background:var(--muted); border:0; border-radius:999px; cursor:pointer; transition:color .15s, background .15s; }
+  .btn-freq:hover { color:var(--foreground); }
+  .btn-freq.on { color:var(--foreground); background:var(--card); box-shadow:0 1px 2px rgb(0 0 0/.06); }
+  .refresh-tip { font-size:12px; color:var(--muted-foreground); min-height:16px; margin:-8px 0 12px; }
+
+  /* 厂家/模型筛选条：按钮式多选下拉（点开 checkbox 浮层），厂家选中后模型选项级联收窄 */
+  .filters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:-6px 0 14px; }
+  .filter-label { font-size:12px; color:var(--muted-foreground); }
+  .filter-dd { position:relative; }
+  .filter-btn { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:5px 12px; font-size:12px; font-weight:500; color:var(--muted-foreground); background:var(--muted); border:0; border-radius:999px; cursor:pointer; transition:color .15s, background .15s; }
+  .filter-btn:hover { color:var(--foreground); }
+  .filter-btn.on { color:var(--primary); background:var(--card); box-shadow:0 1px 2px rgb(0 0 0/.06); }
+  .filter-pop { display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:30; min-width:240px; max-height:280px; overflow:auto; background:var(--card); border:1px solid var(--border); border-radius:var(--radius-pop); box-shadow:0 8px 24px rgb(0 0 0/.14); padding:6px; }
+  .filter-dd.open .filter-pop { display:block; }
+  .filter-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:var(--radius-control); font-size:12px; cursor:pointer; color:var(--foreground); }
+  .filter-item:hover { background:var(--muted); }
+  .filter-item input { accent-color:var(--primary); margin:0; }
+  .filter-item .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .filter-item .cnt { margin-left:auto; padding-left:10px; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+  .filter-pop .empty-opt { padding:10px 8px; font-size:12px; color:var(--muted-foreground); text-align:center; }
+  .filter-clear { padding:5px 10px; font-size:12px; color:var(--muted-foreground); background:transparent; border:0; border-radius:999px; cursor:pointer; }
+  .filter-clear:hover { color:var(--red); }
+
+  .section { font-size:13px; font-weight:600; color:var(--muted-foreground); margin:20px 0 8px; }
+  .section .count { font-weight:400; color:var(--muted-foreground); font-size:12px; margin-left:6px; }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted-foreground); font-weight:500; font-size:12px; }
+  tbody tr:hover { background:var(--muted); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  th.num { text-align:right; }
+  .muted { color:var(--muted-foreground); }
+  .empty { padding:24px; text-align:center; color:var(--muted-foreground); font-size:13px; }
+
+  /* 分页 */
+  .pager { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-top:10px; font-size:12px; color:var(--muted-foreground); }
+  .pager button { padding:4px 10px; border:1px solid var(--border); border-radius:var(--radius-control); background:var(--card); color:var(--foreground); font-size:12px; cursor:pointer; }
+  .pager button:disabled { opacity:.4; cursor:default; }
+  .pager button:not(:disabled):hover { border-color:var(--primary); color:var(--primary); }
+
+  #loading { padding:48px; text-align:center; color:var(--muted-foreground); font-size:13px; }
+  #report { display:none; }
+</style>
+</head>
+<body>
+<h1>Kimi Code 用量明细</h1>
+
+<div id="live">
+  <div class="grid">
+    <div class="card"><div class="label">生成速度 TPS</div><div class="value v-plain" id="lv-tps">--</div><div class="sub" id="lv-ttft">TTFT --</div></div>
+    <div class="card"><div class="label">缓存命中率（实时）</div><div class="value v-cache" id="lv-cache">--</div><div class="sub" id="lv-agents">agents --</div></div>
+    <div class="card"><div class="label">今日总 token</div><div class="value v-plain" id="lv-today">--</div><div class="sub" id="lv-today-detail">--</div></div>
+    <div class="card"><div class="label">订阅额度</div><div class="quota-windows" id="lv-quota">--</div><div class="sub" id="lv-quota-status">--</div></div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <div class="seg" id="rangeBtns">
+    <button class="seg-btn on" data-range="today">今日</button>
+    <button class="seg-btn" data-range="last24h">24 小时</button>
+    <button class="seg-btn" data-range="last7d">7 天</button>
+    <button class="seg-btn" data-range="last30d">30 天</button>
+    <button class="seg-btn" data-range="all">全部</button>
+  </div>
+  <div class="toolbar-right">
+    <button class="btn-refresh" id="btnRefresh">刷新</button>
+    <button class="btn-freq" id="freqBtn">自动刷新：关闭</button>
+  </div>
+</div>
+<div id="refreshTip" class="refresh-tip"></div>
+
+<div class="filters">
+  <span class="filter-label">筛选</span>
+  <div class="filter-dd" id="ddProvider">
+    <button class="filter-btn" id="providerBtn">厂家：全部 ▾</button>
+    <div class="filter-pop" id="providerPop"></div>
+  </div>
+  <div class="filter-dd" id="ddModel">
+    <button class="filter-btn" id="modelBtn">模型：全部 ▾</button>
+    <div class="filter-pop" id="modelPop"></div>
+  </div>
+  <button class="filter-clear" id="clearFilters" style="display:none">清除筛选</button>
+</div>
+
+<div id="loading">扫描中…</div>
+<div id="report">
+  <div class="grid" id="metricCards"></div>
+  <div class="section" id="modelSection">模型统计</div>
+  <table id="modelTable">
+    <thead><tr><th>模型</th><th>厂家</th><th class="num">请求</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存读</th><th class="num">缓存写</th><th class="num">命中率</th><th class="num">费用(元)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="section" id="recentSection">最近请求 <span class="count" id="recentCount"></span></div>
+  <table id="recentTable">
+    <thead><tr><th>时间</th><th>模型</th><th>会话</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存读</th><th class="num">命中率</th><th class="num">耗时</th><th class="num">费用</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="pager" id="recentPager"></div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const fmtInt = n => (n==null? '--' : Number(n).toLocaleString('en-US'));
+const fmtNum = n => { if(n==null) return '--'; const v=Number(n); if(v>=1e8) return (v/1e8).toFixed(2)+'亿'; if(v>=1e4) return (v/1e4).toFixed(1).replace(/\.0$/,'')+'万'; return v.toLocaleString('en-US'); };
+const fmtTime = ms => ms? new Date(Number(ms)).toLocaleString('zh-CN',{hour12:false}) : '--';
+const fmtDur = ms => ms==null? '--' : (ms<1000? ms+'ms' : (ms/1000).toFixed(1)+'s');
+const fmtRate = r => (r==null||r===0)? '--' : Math.round(r*100)+'%';
+// R7：渲染进 HTML 前转义，防模型名/别名/会话 ID 注入。
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---- RPC ---- */
+let reqId = 0;
+const pending = {};
+function call(method, params){
+  return new Promise((resolve,reject)=>{
+    const id = ++reqId;
+    pending[id] = {resolve,reject};
+    window.chrome.webview.postMessage(JSON.stringify({id, method, params}));
+    setTimeout(()=>{ if(pending[id]){ delete pending[id]; reject(new Error('timeout '+method)); } }, 180000);
+  });
+}
+
+/* ---- 时间范围 ---- */
+let currentRange = 'today';
+function rangeMs(range){
+  const now = new Date();
+  if(range==='today'){ const s=new Date(); s.setHours(0,0,0,0); return {start:s.getTime(), end:now.getTime()}; }
+  if(range==='last24h') return {start:now.getTime()-24*3600e3, end:now.getTime()};
+  if(range==='last7d') return {start:now.getTime()-7*86400e3, end:now.getTime()};
+  if(range==='last30d') return {start:now.getTime()-30*86400e3, end:now.getTime()};
+  return {start:null, end:null}; // all
+}
+
+/* ---- WebMessage：仅字符串才 parse（PostWebMessageAsJson 合法 JSON 时 ev.data 已是对象） ---- */
+window.chrome.webview.addEventListener('message', ev=>{
+  let msg = ev.data;
+  if (typeof msg === 'string') { try { msg = JSON.parse(msg); } catch(e){ return; } }
+  if(msg.id && pending[msg.id]){
+    const p = pending[msg.id]; delete pending[msg.id];
+    msg.ok ? p.resolve(msg.data) : p.reject(new Error(msg.error||'rpc error'));
+    return;
+  }
+  if(msg.type==='live') renderLive(msg.data);
+});
+
+/* ---- 实时卡 ---- */
+function renderLive(d){
+  $('lv-tps').textContent = d.tps!=null ? d.tps.toFixed(1) : '--';
+  $('lv-ttft').textContent = 'TTFT ' + (d.ttft!=null? d.ttft+'ms' : '--');
+  $('lv-cache').textContent = fmtRate(d.cacheRate);
+  $('lv-agents').textContent = 'agents ' + (d.agents!=null? d.agents : '--');
+  if(d.today){
+    const t = d.today.tokens||{};
+    $('lv-today').textContent = fmtNum(t.total) + (d.today.limitsReached? ' *' : '');
+    $('lv-today-detail').textContent = '输 '+fmtNum(t.inputOther)+' · 出 '+fmtNum(t.output)+' · 缓读 '+fmtNum(t.inputCacheRead)+' · 缓写 '+fmtNum(t.inputCacheCreation);
+  }
+  if(d.quota){
+    renderQuota(d.quota);
+  }
+}
+
+/* ---- 订阅额度卡：7d/5h 两窗口并排（CSS 竖线分隔），各带百分比/进度条/剩余量/倒计时 ---- */
+// 百分比分级对齐托盘/图标：≥85% 红、≥60% 黄、其余绿。
+function quotaPct(w){ return w.limit>0 ? Math.round((w.used/w.limit)*100) : 0; }
+function quotaLevel(pct){ return pct>=85 ? 'danger' : (pct>=60 ? 'warn' : 'ok'); }
+// 重置倒计时对齐 internal/quota/display.go Countdown：~2h18m / ~3d2h / ~reset。
+function fmtCountdown(resetMs){
+  const remain = Math.max(0, Math.floor((resetMs-Date.now())/1000));
+  if(remain<=0) return '~reset';
+  const d = Math.floor(remain/86400), h = Math.floor((remain%86400)/3600), m = Math.floor((remain%3600)/60);
+  if(d>0) return '~'+d+'d'+h+'h';
+  if(h>0) return '~'+h+'h'+m+'m';
+  return '~'+m+'m';
+}
+function quotaWinHtml(w){
+  const pct = quotaPct(w);
+  const lvl = quotaLevel(pct);
+  const remain = w.limit>0 ? Math.max(0, Math.round(w.limit-w.used)) : null;
+  const reset = w.resetTime ? new Date(w.resetTime).getTime() : null;
+  return '<div class="qwin '+lvl+'">'+
+    '<div class="qwin-head"><span class="qwin-label">'+esc(w.label)+'</span><span class="qwin-pct">'+pct+'%</span></div>'+
+    '<div class="bar"><div class="bar-fill" style="width:'+Math.min(100,pct)+'%"></div></div>'+
+    '<div class="qwin-meta"><span>'+(remain!=null?'余 '+fmtNum(remain):'')+'</span><span class="qwin-cd" data-reset="'+(reset||'')+'">'+(reset?fmtCountdown(reset):'')+'</span></div>'+
+    '</div>';
+}
+function renderQuota(q){
+  $('lv-quota').innerHTML = (q.windows && q.windows.length)? q.windows.map(quotaWinHtml).join('') : '--';
+  $('lv-quota-status').textContent = q.status==='ok' ? '已认证 · 每 5 分钟自动刷新' : (q.status==='not-logged-in' ? '未登录' : '--');
+}
+
+/* ---- 卡片渲染 ---- */
+function card(label, value, sub, cls){
+  return '<div class="card"><div class="label">'+label+'</div><div class="value '+cls+'">'+value+'</div><div class="sub">'+sub+'</div></div>';
+}
+function renderMetrics(t, r){
+  const cards = [
+    card('请求数', fmtInt(r.requests), '', 'v-plain'),
+    card('token 总计', fmtNum(t.total), fmtInt(t.inputOther)+' 输入 · '+fmtInt(t.output)+' 输出', 'v-plain'),
+    card('输入', fmtNum(t.inputOther), '非缓存输入', 'v-in'),
+    card('输出', fmtNum(t.output), '', 'v-out'),
+    card('缓存读', fmtNum(t.inputCacheRead), '命中 '+fmtRate(r.cacheHitRate), 'v-cache'),
+    card('缓存写', fmtNum(t.inputCacheCreation), '', 'v-write'),
+  ];
+  if(r.pricedCostCny!=null) cards.push(card('估算费用', r.pricedCostCny, r.unpricedRequests? '未计费 '+r.unpricedRequests+' 次' : '', 'v-plain'));
+  if(r.limitsReached) cards.push(card('数据完整性', '已超上限', '扫描被截断', 'warn'));
+  $('metricCards').innerHTML = cards.join('');
+}
+
+/* ---- 最近请求分页 ---- */
+const PAGE = 100;
+let recentAll = [];
+let recentPage = 0;
+function renderRecent(){
+  const tb = $('recentTable').querySelector('tbody');
+  if(!recentAll.length){ tb.innerHTML = '<tr><td colspan="9" class="empty">无数据</td></tr>'; $('recentPager').innerHTML=''; return; }
+  $('recentCount').textContent = '共 '+recentAll.length+' 条 · 显示最新';
+  const pages = Math.ceil(recentAll.length/PAGE);
+  if(recentPage>=pages) recentPage=pages-1;
+  const rows = recentAll.slice(recentPage*PAGE, recentPage*PAGE+PAGE);
+  tb.innerHTML = rows.map(x=>'<tr>'+
+    '<td>'+fmtTime(x.time)+'</td>'+
+    '<td>'+esc(x.model)+'</td>'+
+    '<td class="muted">'+esc(x.sessionId)+'</td>'+
+    '<td class="num">'+fmtInt(x.tokens.inputOther)+'</td>'+
+    '<td class="num">'+fmtInt(x.tokens.output)+'</td>'+
+    '<td class="num">'+fmtInt(x.tokens.inputCacheRead)+'</td>'+
+    '<td class="num">'+fmtRate(x.cacheHitRate)+'</td>'+
+    '<td class="num">'+fmtDur(x.durationMs)+'</td>'+
+    '<td class="num">'+(x.costCny||'—')+'</td></tr>'
+  ).join('');
+  $('recentPager').innerHTML =
+    '<button '+(recentPage===0?'disabled':'')+' id="pgPrev">上一页</button>'+
+    '<span>'+(recentPage+1)+' / '+pages+'</span>'+
+    '<button '+(recentPage>=pages-1?'disabled':'')+' id="pgNext">下一页</button>';
+  $('pgPrev').onclick = ()=>{ if(recentPage>0){ recentPage--; renderRecent(); } };
+  $('pgNext').onclick = ()=>{ if(recentPage<pages-1){ recentPage++; renderRecent(); } };
+}
+
+/* ---- 报表渲染 ---- */
+function renderModelTable(r){
+  const mt = $('modelTable').querySelector('tbody');
+  mt.innerHTML = (r.models||[]).slice(0,100).map(m=>'<tr>'+
+    '<td>'+esc(m.model)+(m.aliases&&m.aliases.length? ' <span class="muted">('+m.aliases.map(esc).join(',')+')</span>':'')+'</td>'+
+    '<td class="muted">'+esc(m.provider||'未标注')+'</td>'+
+    '<td class="num">'+fmtInt(m.requests)+'</td>'+
+    '<td class="num">'+fmtNum(m.tokens.inputOther)+'</td>'+
+    '<td class="num">'+fmtNum(m.tokens.output)+'</td>'+
+    '<td class="num">'+fmtNum(m.tokens.inputCacheRead)+'</td>'+
+    '<td class="num">'+fmtNum(m.tokens.inputCacheCreation)+'</td>'+
+    '<td class="num">'+fmtRate(m.cacheHitRate)+'</td>'+
+    '<td class="num">'+(m.costCny!=null? esc(m.costCny) : '—')+'</td></tr>'
+  ).join('') || '<tr><td colspan="9" class="empty">'+(filterActive()? '当前筛选条件下无数据' : '无数据')+'</td></tr>';
+}
+function renderReport(r, opts){
+  opts = opts||{};
+  const t = r.tokens||{};
+  // 今日档：同口径 today-only 汇总 + 模型统计 + 最近请求（与托盘 256K 行一致）。
+  if(r.todayMode){
+    if(r.requests===0){
+      // 今日无调用：干净空态，不显示空表格（带筛选时改为条件无数据提示）
+      $('loading').style.display='block';
+      $('loading').innerHTML='<div class="empty">'+(filterActive()? '当前筛选条件下无数据' : '今日暂无调用记录')+'</div>';
+      $('report').style.display='none';
+      return;
+    }
+    $('loading').style.display='none';
+    $('report').style.display='block';
+    renderMetrics(t, r);
+    $('modelSection').style.display=''; $('modelTable').style.display='';
+    renderModelTable(r);
+    $('recentSection').style.display=''; $('recentTable').style.display=''; $('recentPager').style.display='';
+    updateFilterDimensions(r);
+    recentAll = r.recent||[]; if(!opts.keepPage) recentPage = 0; renderRecent();
+    return;
+  }
+  $('loading').style.display='none';
+  $('report').style.display='block';
+  $('modelSection').style.display=''; $('modelTable').style.display='';
+  $('recentSection').style.display=''; $('recentTable').style.display=''; $('recentPager').style.display='';
+  renderMetrics(t, r);
+  renderModelTable(r);
+  updateFilterDimensions(r);
+  recentAll = r.recent||[]; if(!opts.keepPage) recentPage = 0; renderRecent();
+}
+
+/* ---- 厂家/模型筛选（多选下拉，厂家选中后模型选项级联收窄） ---- */
+// 筛选后 reports 仍携带全量口径的 dimensions（选项计数恒为未筛时全量值），
+// 级联只在选项展示层裁剪模型列表，不影响后端过滤条件。
+let selProviders = [];
+let selModels = [];
+let dimensionCache = { models:[], providers:[], modelProviders:{} };
+
+function filterActive(){ return selProviders.length>0 || selModels.length>0; }
+
+function providerName(p){
+  // 展示名：托管 provider 显示为 "kimi-code"（去掉 managed: 前缀），其余原样。
+  if(p === '未标注') return p;
+  return p.startsWith('managed:') ? p.slice('managed:'.length) : p;
+}
+
+function renderFilterOptions(){
+  // 厂家下拉：按请求次数降序（dimensions 已排好序）。
+  const provs = dimensionCache.providers||[];
+  $('providerBtn').textContent = '厂家：' + (selProviders.length? (selProviders.length===1? providerName(selProviders[0]) : '已选 '+selProviders.length+' 项') : '全部') + ' ▾';
+  $('providerBtn').classList.toggle('on', selProviders.length>0);
+  $('providerPop').innerHTML = provs.length? provs.map(p=>
+    '<label class="filter-item"><input type="checkbox" value="'+esc(p.value)+'" '+(selProviders.includes(p.value)?'checked':'')+'>'+
+    '<span class="nm">'+esc(providerName(p.value))+'</span><span class="cnt">'+fmtInt(p.requests)+'</span></label>'
+  ).join('') : '<div class="empty-opt">暂无数据</div>';
+  $('providerPop').querySelectorAll('input').forEach(cb=>{
+    cb.onchange = ()=>{
+      selProviders = [...$('providerPop').querySelectorAll('input:checked')].map(x=>x.value);
+      // 级联：厂家变化后，被收窄掉厂家的已选模型自动剔除，避免双条件组合恒空。
+      const avail = availableModelSet();
+      selModels = selModels.filter(m=>avail.has(m));
+      renderFilterOptions();
+      loadReport();
+    };
+  });
+
+  // 模型下拉：选中厂家时级联只列该（些）厂家的模型；未选厂家时列全部。
+  const modelProv = dimensionCache.modelProviders||{};
+  let models = (dimensionCache.models||[]);
+  if(selProviders.length) models = models.filter(m=>selProviders.includes(modelProv[m.value]||'未标注'));
+  $('modelBtn').textContent = '模型：' + (selModels.length? (selModels.length===1? selModels[0] : '已选 '+selModels.length+' 项') : '全部') + ' ▾';
+  $('modelBtn').classList.toggle('on', selModels.length>0);
+  $('modelPop').innerHTML = models.length? models.map(m=>
+    '<label class="filter-item"><input type="checkbox" value="'+esc(m.value)+'" '+(selModels.includes(m.value)?'checked':'')+'>'+
+    '<span class="nm">'+esc(m.value)+'</span><span class="cnt">'+fmtInt(m.requests)+'</span></label>'
+  ).join('') : '<div class="empty-opt">'+(selProviders.length? '所选厂家下无模型' : '暂无数据')+'</div>';
+  $('modelPop').querySelectorAll('input').forEach(cb=>{
+    cb.onchange = ()=>{
+      selModels = [...$('modelPop').querySelectorAll('input:checked')].map(x=>x.value);
+      renderFilterOptions();
+      loadReport();
+    };
+  });
+
+  $('clearFilters').style.display = filterActive()? '' : 'none';
+}
+
+function availableModelSet(){
+  const modelProv = dimensionCache.modelProviders||{};
+  const s = new Set();
+  (dimensionCache.models||[]).forEach(m=>{
+    if(!selProviders.length || selProviders.includes(modelProv[m.value]||'未标注')) s.add(m.value);
+  });
+  return s;
+}
+
+function updateFilterDimensions(r){
+  // 今日档与全量档统一经 dimensions 透出模型/厂家选项（均为筛选前全量口径，
+  // 见 ScanToday 的 Dimensions 与全量 Scan 的 consumeMainRecord 计数时序）。
+  if(r.dimensions){
+    dimensionCache = {
+      models: r.dimensions.models||[],
+      providers: r.dimensions.providers||[],
+      modelProviders: r.dimensions.modelProviders||{},
+    };
+  }
+  const avail = availableModelSet();
+  selModels = selModels.filter(m=>avail.has(m));
+  renderFilterOptions();
+}
+
+function setupFilterDropdowns(){
+  [['ddProvider','providerBtn','providerPop'],['ddModel','modelBtn','modelPop']].forEach(([dd,btn,pop])=>{
+    $(btn).onclick = e=>{ e.stopPropagation(); $(dd).classList.toggle('open'); };
+    $(pop).onclick = e=>e.stopPropagation();
+  });
+  document.addEventListener('click', ()=>{
+    $('ddProvider').classList.remove('open');
+    $('ddModel').classList.remove('open');
+  });
+  $('clearFilters').onclick = ()=>{
+    selProviders = []; selModels = [];
+    renderFilterOptions();
+    loadReport();
+  };
+}
+
+/* ---- 加载（loadSeq 竞态保护：只渲染最新一次请求的回复） ---- */
+let loadSeq = 0;
+// silent=true：静默刷新（定时器/按钮），不清空现有报告、不显示全屏"扫描中…"、
+// 保留最近请求分页，数据回来后直接覆盖渲染。
+async function loadReport(silent){
+  const mySeq = ++loadSeq;
+  if(!silent){
+    $('loading').style.display='block';
+    $('loading').textContent = '扫描中…';
+    $('report').style.display='none';
+  }
+  const r = rangeMs(currentRange);
+  try {
+    // 厂家/模型筛选与时间档条件正交：两个下拉的选中项随每次扫描透传给后端。
+    const params = {startMs:r.start, endMs:r.end, range:currentRange};
+    if(selProviders.length) params.providers = selProviders;
+    if(selModels.length) params.models = selModels;
+    const data = await call('scan_usage', params);
+    if(mySeq !== loadSeq) return true; // 过期请求：已有更新的点击，丢弃
+    renderReport(data, {keepPage:!!silent});
+    return true;
+  } catch(e){
+    if(mySeq !== loadSeq) return true;
+    if(silent){
+      // 静默刷新失败：保留旧数据，仅轻提示
+      showTip('刷新失败：'+e.message);
+    } else {
+      $('loading').textContent = '加载失败：'+e.message;
+    }
+    return false;
+  }
+}
+
+document.querySelectorAll('#rangeBtns button').forEach(btn=>{
+  btn.onclick = ()=>{
+    document.querySelectorAll('#rangeBtns button').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    currentRange = btn.dataset.range;
+    loadReport();
+  };
+});
+
+/* ---- 刷新按钮（手动立即刷新）+ 自动刷新频率开关（单按钮循环切换） ---- */
+// 频率选项：null 表示"关闭"（不自动刷新）。点击按钮按 关闭→5s→10s→15s→30s→60s→关闭 循环。
+const FREQ_OPTIONS = [null, 5000, 10000, 15000, 30000, 60000];
+const FREQ_LABEL  = {5000:'5s', 10000:'10s', 15000:'15s', 30000:'30s', 60000:'60s'};
+let refreshMs = null;   // 默认关闭：不自动刷新
+let refreshTimer = null;
+function showTip(msg){
+  $('refreshTip').textContent = msg;
+  clearTimeout(showTip._t);
+  showTip._t = setTimeout(()=>{ $('refreshTip').textContent=''; }, 4000);
+}
+function refreshNow(){
+  const btn = $('btnRefresh');
+  btn.disabled = true;
+  loadReport(true).then(()=>{ btn.disabled=false; }).catch(()=>{ btn.disabled=false; });
+  // 非"今日"档：同步刷新今日缓存，保证实时卡"今日总 token"与下次切到今日档时一致。
+  if(currentRange !== 'today'){ call('refresh_today', {}).catch(()=>{}); }
+}
+function applyAutoRefresh(){
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+  const btn = $('freqBtn');
+  if(refreshMs == null){
+    btn.textContent = '自动刷新：关闭';
+    btn.classList.remove('on');
+    return;
+  }
+  btn.textContent = '自动刷新：' + FREQ_LABEL[refreshMs];
+  btn.classList.add('on');
+  refreshTimer = setInterval(refreshNow, refreshMs);
+}
+// 手动刷新：只立即刷新一次，不改变自动刷新开关状态。
+$('btnRefresh').onclick = ()=> refreshNow();
+// 自动刷新开关：点击循环切换频率。
+$('freqBtn').onclick = ()=>{
+  refreshMs = FREQ_OPTIONS[(FREQ_OPTIONS.indexOf(refreshMs)+1) % FREQ_OPTIONS.length];
+  applyAutoRefresh();
+};
+
+// 页面就绪：请求一次实时快照 + 首扫（自动刷新默认关闭，不启动定时器）。
+setupFilterDropdowns();
+call('request_live', {}).then(d=>renderLive(d)).catch(()=>{});
+loadReport();
+
+// 配额重置倒计时本地每分钟刷新（后端 heartbeat 只在值变化时推送，倒计时不触发推送）。
+setInterval(()=>{
+  document.querySelectorAll('.qwin-cd').forEach(el=>{
+    const r = el.dataset.reset;
+    if(r) el.textContent = fmtCountdown(Number(r));
+  });
+}, 60000);
+</script>
+</body>
+</html>

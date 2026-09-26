@@ -1,0 +1,33 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": [
+        "icon_16.png",
+        "icon_32.png",
+        "icon_48.png",
+        "icon_256.png"
+      ]
+    }
+  },
+  "RT_VERSION": {
+    "1": {
+      "0000": {
+        "fixed": {
+          "file_version": "1.0.0.0",
+          "product_version": "1.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "kimi-hud",
+            "FileDescription": "Kimi Code Token HUD - 桌面托盘 token 统计",
+            "FileVersion": "1.0.0",
+            "InternalName": "kimi-hud",
+            "OriginalFilename": "kimi-hud.exe",
+            "ProductName": "kimi-hud",
+            "ProductVersion": "1.0.0"
+          }
+        }
+      }
+    }
+  }
+}
