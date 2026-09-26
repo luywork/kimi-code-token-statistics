@@ -182,13 +182,3 @@ scripts/            PE/图标校验、配额 API 测试脚本
 
 - UI 线程（托盘消息循环 + WebView2 COM apartment）通过 `runtime.LockOSThread()` 绑定主 OS 线程，所有 COM/窗口调用必须在其上发生。`metrics.State` 无内部锁，必须在 `main.go` 的 `stMu` 锁内访问。
 - 行为对拍参考：原版零依赖 Node.js 实现 `D:\Project\kimi-code-hud-main\src\*.mjs`（用于常量与语义核对）。
-
-## 文档
-
-设计与评审文档（中文）仅保留在本地 `doc/` 目录，未纳入版本管理，克隆仓库后不可见：
-
-- `kimi-code-token统计桌面服务项目方案.md` — 项目总体方案
-- `02-kimi-usage-tracker功能整合方案.md` — WebView2 详情窗口设计
-- `02-kimi-hud-WebView2-SPIKE预研结果.md` — WebView2 SPIKE 预研结果
-- `成本设置说明.md` — 费用/单价配置指南
-- `开发过程工具问题记录.md` — 开发工具问题记录

@@ -182,13 +182,3 @@ scripts/            PE/icon checkers, quota API test scripts
 
 - The UI thread (tray message loop + WebView2 COM apartment) is pinned to the main OS thread via `runtime.LockOSThread()`; all COM/window calls must happen there. `metrics.State` has no internal lock and must be accessed under the `stMu` mutex in `main.go`.
 - Behavioral reference: the original zero-dependency Node.js implementation at `D:\Project\kimi-code-hud-main\src\*.mjs` (used to cross-check constants and semantics).
-
-## Documentation
-
-Design and review documents (mostly Chinese) are kept in the local `doc/` directory only — they are excluded from version control and will not appear in a fresh clone:
-
-- `kimi-code-token统计桌面服务项目方案.md` — overall project design
-- `02-kimi-usage-tracker功能整合方案.md` — WebView2 detail-window design
-- `02-kimi-hud-WebView2-SPIKE预研结果.md` — WebView2 spike findings
-- `成本设置说明.md` — cost/pricing configuration guide
-- `开发过程工具问题记录.md` — tooling pitfalls log
