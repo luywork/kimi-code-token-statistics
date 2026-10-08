@@ -48,12 +48,14 @@ type liveQuota struct {
 
 // liveWindow 配额窗口实时快照：除已用/上限外，附带剩余量与重置时间，
 // 供前端渲染进度条/剩余量/重置倒计时（对齐托盘菜单 formatWindow 的信息维度）。
+// UsedRatio 服务端精确比率（-1=未知），前端优先用它渲染百分比。
 type liveWindow struct {
 	Label     string    `json:"label"`
 	Used      float64   `json:"used"`
 	Limit     float64   `json:"limit"`
 	Remaining float64   `json:"remaining"`
 	ResetTime time.Time `json:"resetTime"`
+	UsedRatio float64   `json:"usedRatio"`
 }
 
 // buildLive 组装实时数据快照（复用 metrics/quota/today 现有能力）。
@@ -85,6 +87,7 @@ func buildLive(st *metrics.State, qc *quota.Client, mc *modelcfg.Config, tm *tod
 			lq.Windows = append(lq.Windows, liveWindow{
 				Label: w.Label, Used: w.Used, Limit: w.Limit,
 				Remaining: w.Remaining, ResetTime: w.ResetTime,
+				UsedRatio: w.UsedRatio,
 			})
 		}
 		// CredentialsState 第二返回值是"是否携带 refresh_token"，与"状态是否

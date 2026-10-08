@@ -427,6 +427,7 @@ func TestLiveChanged(t *testing.T) {
 	quotaReset := &liveQuota{Status: "ok", Windows: []liveWindow{{Label: "5h", Used: 10, Limit: 100, ResetTime: time.Now().Add(-time.Hour)}}}
 	quotaLimit := &liveQuota{Status: "ok", Windows: []liveWindow{{Label: "5h", Used: 10, Limit: 120}}}
 	quotaRemaining := &liveQuota{Status: "ok", Windows: []liveWindow{{Label: "5h", Used: 10, Limit: 100, Remaining: 50}}}
+	quotaRatio := &liveQuota{Status: "ok", Windows: []liveWindow{{Label: "5h", Used: 10, Limit: 100, UsedRatio: 0.220754}}}
 
 	base := liveData{Agents: 1, Today: todayA, Quota: quotaA}
 
@@ -446,12 +447,18 @@ func TestLiveChanged(t *testing.T) {
 		{"quota resetTime changed", base, func() liveData { d := base; d.Quota = quotaReset; return d }(), true},
 		// 前端 pct/进度条/剩余量消费 limit（frontend.html quotaPct/remain）。
 		{"quota limit changed", base, func() liveData { d := base; d.Quota = quotaLimit; return d }(), true},
+		// UsedRatio 参与比较（P2-2 评审修复）：旧缓存 -1 → 服务端回填精确比率，
+		// Used/Limit 不变也必须推送，否则前端拿不到服务端比率。
+		{"quota usedRatio changed", base, func() liveData { d := base; d.Quota = quotaRatio; return d }(), true},
 		// 四维明细互变（InputOther/Output 此消彼长）Total 不变：不推送。
 		{"today detail swap same total", base, func() liveData { d := base; d.Today = todayB; return d }(), false},
-		// 前端不渲染 Swarm/ModelAlias 与窗口 Remaining：不推送。
+		// 前端不渲染 Swarm/ModelAlias：不推送。
 		{"swarm toggled", base, func() liveData { d := base; d.Swarm = !d.Swarm; return d }(), false},
 		{"alias changed", base, func() liveData { d := base; d.ModelAlias = "other"; return d }(), false},
-		{"quota remaining changed", base, func() liveData { d := base; d.Quota = quotaRemaining; return d }(), false},
+		// Remaining 已是前端渲染项（P3-4 评审修复：quotaWinHtml 优先消费
+		// w.remaining），必须参与比较（第二轮评审新1）；bonus/overflow 场景
+		// remaining 与 used/limit 解耦变化，漏推会让"余 N"过时。
+		{"quota remaining changed", base, func() liveData { d := base; d.Quota = quotaRemaining; return d }(), true},
 	}
 	for _, c := range cases {
 		if got := liveChanged(c.a, c.b); got != c.want {

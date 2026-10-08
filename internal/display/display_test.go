@@ -1,6 +1,8 @@
 package display
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +157,46 @@ func TestQuotaWindowItem(t *testing.T) {
 	}
 	if it.Sub == "" {
 		t.Fatal("countdown sub should be set")
+	}
+}
+
+// TestQuotaWindowItemServerRatio 服务端 used_ratio 优先于 Used/Limit 推导
+//（P2-1 评审修复回归：同一窗口推导 50%、服务端 90% → 应按 90% 显示红色）。
+func TestQuotaWindowItemServerRatio(t *testing.T) {
+	w := quota.Window{Label: "5h", Used: 50, Limit: 100, UsedRatio: 0.9, ResetTime: time.Now().Add(time.Hour)}
+	it := quotaWindowItem(w)
+	if it.Progress == nil || *it.Progress != 0.9 {
+		t.Fatalf("progress = %v, want 0.9 (server ratio)", it.Progress)
+	}
+	if it.Color != 0xe53935 {
+		t.Fatalf("color = 0x%06X, want red 0xe53935 (90%% >= 85%%)", it.Color)
+	}
+}
+
+// TestIconColorServerRatio IconColor 分级走 Ratio()（P2-1 评审修复回归）：
+// BestWindow 选中的窗口在 IconColor 内部也须用服务端比率而非 Used/Limit 推导。
+// 缓存经磁盘文件注入（走生产 loadDiskCache 读路径，quota 包私有字段无需暴露）。
+func TestIconColorServerRatio(t *testing.T) {
+	dir := t.TempDir()
+	qc := quota.NewClient(filepath.Join(dir, "missing.json"), filepath.Join(dir, "quota.json"))
+	writeQuotaCache(t, filepath.Join(dir, "quota.json"), `[{"label":"5h","used":50,"limit":100,"usedRatio":0.9}]`)
+	if got := IconColor(&metrics.State{}, qc); got != 0xe53935 {
+		t.Fatalf("IconColor = 0x%06X, want red 0xe53935 (server ratio 90%%)", got)
+	}
+	// 对照：无服务端比率时走推导，50% → 绿。
+	qc = quota.NewClient(filepath.Join(dir, "missing.json"), filepath.Join(dir, "quota2.json"))
+	writeQuotaCache(t, filepath.Join(dir, "quota2.json"), `[{"label":"5h","used":50,"limit":100}]`)
+	if got := IconColor(&metrics.State{}, qc); got != 0x43a047 {
+		t.Fatalf("IconColor = 0x%06X, want green 0x43a047 (derived 50%%)", got)
+	}
+}
+
+// writeQuotaCache 写一份 TTL 内有效的 quota 磁盘缓存（fetchedAt=now）。
+func writeQuotaCache(t *testing.T, path, windowsJSON string) {
+	t.Helper()
+	payload := `{"fetchedAt":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","windows":` + windowsJSON + `}`
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

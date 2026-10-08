@@ -16,7 +16,7 @@ kimi-hud 是一个用 Go 编写的 Windows 系统托盘常驻服务，统计 **K
 ## 环境要求
 
 - Windows 10 / 11（x64）
-- 已安装并登录 **Kimi Code CLI**（数据读取自 `~/.kimi-code/`）
+- 已安装并登录 **Kimi Code CLI**（数据读取自 `~/.kimi-code/`）。实时指标 / 今日用量纯离线读本地日志；订阅额度默认用 CLI 的短期 access_token（需要 CLI 偶尔运行来刷新）——也可在 `config.toml` 配置长期 API key，彻底解除对 CLI 的依赖（见「配置」节）。
 - **WebView2 Runtime** — 仅详情窗口需要；更新过的 Win10/11 一般已内置，缺失时从 [微软官网](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) 安装
 - Go 1.25+ 与 Git — 仅源码构建需要
 - Python 3 — 可选，仅辅助脚本（`scripts/`）使用
@@ -149,12 +149,26 @@ monthly_cny = 60.0            # 订阅月费（仅展示，不参与计费）
 - 用户自定义覆盖内置表。
 - 完整价格表参考见 `doc/成本设置说明.md`（仅本地保留，不入库）。
 
+### 订阅额度 API key（可选，推荐）
+
+默认额度查询使用 CLI 的短期 `access_token`（15 分钟过期），Kimi Code CLI 不运行时请求会 401、托盘只能显示旧缓存。可配置**长期 API key**（从 [Kimi For Coding 控制台](https://www.kimi.com/code/)获取，`sk-kimi-...`）彻底解除对 CLI 的依赖：
+
+```toml
+[quota]
+api_key = "sk-kimi-..."
+```
+
+- 保存后 ≤5s 热加载；删除该段自动回退 access_token 模式。
+- 额度生效需等配额缓存过期（最长 5min TTL），或点托盘「刷新配额」立即生效。
+- 401（key 被吊销/输错）时保留旧缓存，菜单提示 `API key 失效：检查 config.toml [quota].api_key`——在 `config.toml` 修好 key 后自动恢复。
+- 百分比优先采用服务端精确 `used_ratio`，而非客户端 `limit - remaining` 推导。
+
 ## 工作原理
 
 三条相互独立的数据管线，只在展示层合并：
 
 1. **实时指标（离线）** — 增量读取 Kimi Code wire 事件日志（`~/.kimi-code/sessions/<工作目录>/session_*/agents/*/wire.jsonl`），由 `step.end` 事件的 usage 字段驱动状态机得出 TPS / TTFT / 缓存命中率。
-2. **订阅额度（联网）** — 携带 CLI 的 access_token 调用 `GET https://api.kimi.com/coding/v1/usages`，TTL 5 分钟缓存。401 时保留旧缓存，等待 Kimi CLI 自行刷新 token。
+2. **订阅额度（联网）** — 调用 `GET https://api.kimi.com/coding/v1/usages`，双凭据路由：配置了 `config.toml` 的长期 API key（`[quota].api_key`，热加载）时与 CLI 运行态完全解耦；未配置回退 CLI 的 `access_token`（15 分钟，靠 CLI 懒刷新）。TTL 5 分钟缓存。401 时保留旧缓存，等 key 修复（热加载）或 CLI 刷新 token 后自动恢复。展示优先采用服务端精确 `used_ratio`。
 3. **今日用量（离线全量扫描）** — today-only 轻量扫描喂给托盘"今日总 token"实时卡（5 分钟缓存，跨天自动重置）；详情窗口"今日"档实时扫描后回填同一缓存，保证两处数值始终一致。
 
 ## 项目结构

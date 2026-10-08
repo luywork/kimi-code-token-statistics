@@ -9,7 +9,7 @@ kimi-hud is a Windows system-tray resident service, written in Go, that tracks y
 - **Realtime metrics** — streaming TPS (median), TTFT, and a `gen Ns` timer while a turn is in flight; multiple parallel agents are aggregated into a fleet speed (e.g. `⚡ 156 t/s (3 agents @52)`).
 - **Cache hit rate** — token-weighted, accumulated across turns; stays steady between turns instead of flickering.
 - **Today's usage** — total tokens (all models) with a per-model breakdown, cached and refreshed automatically.
-- **Subscription quota** — 5h / 7d usage bars with percentage and reset countdown; tray icon turns green / yellow / red by usage level (thresholds at 60% and 85%). Third-party providers hide this section automatically (it never represents API balance).
+- **Subscription quota** — 5h / 7d usage bars with percentage and reset countdown; tray icon turns green / yellow / red by usage level (thresholds at 60% and 85%). Third-party providers hide this section automatically (it never represents API balance). Optional: configure a long-lived Kimi For Coding API key (`[quota].api_key` in `config.toml`) so quota works even when the Kimi Code CLI is not running; server-side exact usage ratios are preferred over client-side derivation when available.
 - **Cost estimation** — local estimate from input / output / cache-read / cache-write token counts, using a built-in Kimi price table; custom per-model prices and a subscription monthly fee can be set in `config.toml` (hot-reloaded, no restart needed).
 - **Detail window** — "View detailed usage…" in the tray menu opens an on-demand WebView2 window with time ranges (today / 24h / 7d / 30d / all), per-model usage and cost, manual refresh and a cycling auto-refresh (5s–60s). Close the window and you're back to the tray; zero overhead while it's closed.
 
@@ -149,12 +149,26 @@ monthly_cny = 60.0            # subscription monthly fee (display only)
 - User overrides take precedence over the built-in table.
 - For the full price-table reference see `doc/成本设置说明.md` (kept locally, not part of the repository).
 
+### Subscription quota API key (optional, recommended)
+
+By default the quota endpoint is called with the CLI's short-lived `access_token` (15 minutes), so when the Kimi Code CLI is not running the request returns 401 and the tray keeps showing the last cached quota. You can instead configure a **long-lived API key** (get one from the [Kimi For Coding console](https://www.kimi.com/code/), `sk-kimi-...`), which works completely independently of the CLI:
+
+```toml
+[quota]
+api_key = "sk-kimi-..."
+```
+
+- Hot-reloaded within ~5 s of saving; deleting the section falls back to the access-token path.
+- Quota values take effect after the cache expires (up to 5 min TTL) or immediately via tray → `Refresh quota`.
+- On 401 (revoked/typo'd key) the cache is kept and the menu shows `API key 失效：检查 config.toml [quota].api_key` — fix the key in `config.toml` and it recovers on its own.
+- Percentages prefer the server-provided exact `used_ratio` over the client-side `limit - remaining` derivation.
+
 ## How it works
 
 Three independent data pipelines, merged only at the presentation layer:
 
 1. **Realtime metrics (offline)** — incremental reads of Kimi Code wire event logs (`~/.kimi-code/sessions/<workdir>/session_*/agents/*/wire.jsonl`) feed a metrics state machine that derives TPS / TTFT / cache hit rate from `step.end` usage events.
-2. **Subscription quota (online)** — calls `GET https://api.kimi.com/coding/v1/usages` with the CLI's access token, cached for 5 minutes. On 401 the old cache is kept until Kimi CLI refreshes the token itself.
+2. **Subscription quota (online)** — calls `GET https://api.kimi.com/coding/v1/usages` with dual-credential routing: a long-lived API key from `config.toml` (`[quota].api_key`, hot-reloaded) when configured — fully decoupled from the CLI — otherwise falls back to the CLI's `access_token` (15 min, refreshed lazily by the CLI). Cached for 5 minutes. On 401 the old cache is kept until the key is fixed (hot-reload) or the CLI refreshes the token itself. Server-side exact `used_ratio` values are preferred for display.
 3. **Today's usage (offline full scan)** — a lightweight today-only scan feeds the tray's "today total" card (5-minute cache, auto-reset at midnight); the detail window's "today" range scans live and back-fills the same cache so both views always agree.
 
 ## Project layout
@@ -182,3 +196,4 @@ scripts/            PE/icon checkers, quota API test scripts
 
 - The UI thread (tray message loop + WebView2 COM apartment) is pinned to the main OS thread via `runtime.LockOSThread()`; all COM/window calls must happen there. `metrics.State` has no internal lock and must be accessed under the `stMu` mutex in `main.go`.
 - Behavioral reference: the original zero-dependency Node.js implementation at `D:\Project\kimi-code-hud-main\src\*.mjs` (used to cross-check constants and semantics).
+src\*.mjs` (used to cross-check constants and semantics).

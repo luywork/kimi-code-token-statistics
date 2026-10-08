@@ -127,11 +127,19 @@ func BuildMenu(st *metrics.State, qc *quota.Client, mc *modelcfg.Config, todayTo
 				add("更新于 " + last.SuccessAt.Format("15:04:05") + " · 每 5 分钟自动刷新")
 			}
 			if last.Unauthorized {
-				add("⚠ 登录态过期：运行 kimi-code 后自动恢复")
+				if qc.UsingAPIKey() {
+					add("⚠ API key 失效：检查 config.toml [quota].api_key")
+				} else {
+					add("⚠ 登录态过期：运行 kimi-code 后自动恢复")
+				}
 			}
 		default:
 			if last.Unauthorized {
-				add("⚠ 登录态过期：运行 kimi-code 后自动恢复")
+				if qc.UsingAPIKey() {
+					add("⚠ API key 失效：检查 config.toml [quota].api_key")
+				} else {
+					add("⚠ 登录态过期：运行 kimi-code 后自动恢复")
+				}
 			} else {
 				add("正在自动刷新配额…")
 			}
@@ -164,16 +172,7 @@ func BuildMenu(st *metrics.State, qc *quota.Client, mc *modelcfg.Config, todayTo
 
 // quotaWindowItem 配额窗口：原生进度条 + 语义色 + 倒计时副文本。
 func quotaWindowItem(w quota.Window) tray.MenuItem {
-	frac := 0.0
-	if w.Limit > 0 {
-		frac = w.Used / w.Limit
-		if frac < 0 {
-			frac = 0
-		}
-		if frac > 1 {
-			frac = 1
-		}
-	}
+	frac := w.Ratio()
 	return tray.MenuItem{
 		Text:     fmt.Sprintf("%s  %d%%", padRight(w.Label, 3), int(frac*100+0.5)),
 		Kind:     tray.KindValue,
@@ -241,10 +240,8 @@ func tfttSuffix(s metrics.Summary) string {
 func IconColor(st *metrics.State, qc *quota.Client) uint32 {
 	if q := qc.Get(time.Now()); q != nil {
 		if w, ok := q.BestWindow(); ok {
-			frac := 0.0
-			if w.Limit > 0 {
-				frac = w.Used / w.Limit
-			}
+			// 与托盘柱条同口径：服务端 used_ratio 优先（P2-1 评审修复）。
+			frac := w.Ratio()
 			switch {
 			case frac >= 0.85:
 				return 0xe53935 // 红

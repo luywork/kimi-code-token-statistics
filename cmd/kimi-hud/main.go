@@ -61,6 +61,11 @@ func main() {
 	// Code 的 ~/.kimi-code/config.toml——不碰 Kimi 的配置文件（其更新可能覆盖我们的段）。
 	pl := pricing.NewOverrideLoader(p.HudConfig)
 
+	// 长期 API key（同文件 [quota].api_key）：配置后订阅额度查询与 kimi-code CLI
+	// 运行态解耦（access_token 15min 过期靠 CLI 懒刷新，CLI 不运行即 401；
+	// sk-kimi key 长期有效，同 /usages 端点直接放行，对齐 cc-switch query_kimi）。
+	qc.SetAPIKeyLoader(quota.NewAPIKeyLoader(p.HudConfig))
+
 	// 详情窗口（WebView2 三层壳）：Runtime 缺失时禁用菜单项（降级）。
 	detailWv := webview.New()
 	detailEnabled := webview.RuntimeAvailable()
@@ -176,6 +181,10 @@ func pollLoop(stMu *sync.Mutex, sess *session.Manager, qc *quota.Client, mc *mod
 			// config.toml 变更时重读（方案 §3.4 任务③ + 用户成本覆盖热加载）。
 			mc.ReloadIfChanged()
 			pl.ReloadIfChanged()
+			// [quota].api_key 热加载（P1-1 评审修复）：改 key 免重启。热加载
+			// ≤5s；额度恢复还需等配额缓存过期（TTL 5min）或手动「刷新配额」
+			// ——缓存 TTL 内 Get 命中不触发网络请求（第二轮评审新2 更正表述）。
+			qc.APIKeyReloadIfChanged()
 			if qc.ShouldRefresh() {
 				qc.RefreshNow()
 			}
@@ -221,10 +230,12 @@ func heartbeat(t *tray.Tray, sess *session.Manager, stMu *sync.Mutex, qc *quota.
 }
 
 // liveChanged 判断实时快照是否发生"值得推送"的变化（防抖，R5）。
-// 参与比较：TPS/TTFT/Cache/今日总 token/agents 数/配额窗口的 Used/Limit/Label/
-// ResetTime 与认证状态——均为前端实时卡展示项。Today 四维明细不单独比较：
-// Total 即四维之和（单调累计，明细变则 Total 必变）；Swarm/ModelAlias 与窗口
-// Remaining 前端不渲染，无需比较。
+// 参与比较：TPS/TTFT/Cache/今日总 token/agents 数/配额窗口的 Used/UsedRatio/
+// Remaining/Limit/Label/ResetTime 与认证状态——均为前端实时卡展示项。Today
+// 四维明细不单独比较：Total 即四维之和（单调累计，明细变则 Total 必变）；
+// Swarm/ModelAlias 前端不渲染，无需比较。Remaining 是渲染项（配额卡"余 N"，
+// P3-4 修复后前端优先消费服务端值，第二轮评审新1），bonus/overflow 场景它与
+// used/limit 解耦变化，必须独立参与比较。
 func liveChanged(a, b liveData) bool {
 	if !numEq(a.TPS, b.TPS) || !numEq(a.TTFTMs, b.TTFTMs) || !numEq(a.Cache, b.Cache) {
 		return true
@@ -251,7 +262,11 @@ func liveChanged(a, b liveData) bool {
 	if aq != nil {
 		for i := range aq.Windows {
 			aw, bw := &aq.Windows[i], &bq.Windows[i]
-			if aw.Used != bw.Used || aw.Label != bw.Label || aw.Limit != bw.Limit {
+			// UsedRatio/Remaining 参与比较（P2-2/第二轮新1 评审修复）：服务端
+			// 比率回填、bonus/overflow 的剩余量变化都可能独立于 used/limit，
+			// 防抖不能漏推（前端"余 N"与百分比直接消费这两个字段）。
+			if aw.Used != bw.Used || aw.Label != bw.Label || aw.Limit != bw.Limit ||
+				aw.UsedRatio != bw.UsedRatio || aw.Remaining != bw.Remaining {
 				return true
 			}
 			// ResetTime 是前端倒计时基准（data-reset）：窗口轮转后翻新，空闲用户

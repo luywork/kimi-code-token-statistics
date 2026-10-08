@@ -245,7 +245,11 @@ function renderLive(d){
 
 /* ---- 订阅额度卡：7d/5h 两窗口并排（CSS 竖线分隔），各带百分比/进度条/剩余量/倒计时 ---- */
 // 百分比分级对齐托盘/图标：≥85% 红、≥60% 黄、其余绿。
-function quotaPct(w){ return w.limit>0 ? Math.round((w.used/w.limit)*100) : 0; }
+// usedRatio（服务端精确比率，<=0 视为未下发）优先，回退 used/limit 推导。
+function quotaPct(w){
+  if (typeof w.usedRatio === 'number' && w.usedRatio > 0) return Math.round(w.usedRatio*100);
+  return w.limit>0 ? Math.round((w.used/w.limit)*100) : 0;
+}
 function quotaLevel(pct){ return pct>=85 ? 'danger' : (pct>=60 ? 'warn' : 'ok'); }
 // 重置倒计时对齐 internal/quota/display.go Countdown：~2h18m / ~3d2h / ~reset。
 function fmtCountdown(resetMs){
@@ -259,7 +263,11 @@ function fmtCountdown(resetMs){
 function quotaWinHtml(w){
   const pct = quotaPct(w);
   const lvl = quotaLevel(pct);
-  const remain = w.limit>0 ? Math.max(0, Math.round(w.limit-w.used)) : null;
+  // 剩余量与百分比同口径（P3-4 评审修复）：服务端 remaining 优先，
+  // 缺失时才用 limit-used 推导（与 quotaPct 的 usedRatio 优先策略对齐）。
+  const remain = (typeof w.remaining === 'number' && w.remaining >= 0)
+    ? Math.round(w.remaining)
+    : (w.limit>0 ? Math.max(0, Math.round(w.limit-w.used)) : null);
   const reset = w.resetTime ? new Date(w.resetTime).getTime() : null;
   return '<div class="qwin '+lvl+'">'+
     '<div class="qwin-head"><span class="qwin-label">'+esc(w.label)+'</span><span class="qwin-pct">'+pct+'%</span></div>'+

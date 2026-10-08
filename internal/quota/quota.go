@@ -26,6 +26,22 @@ type Window struct {
 	Limit     float64   `json:"limit"`
 	Remaining float64   `json:"remaining"`
 	ResetTime time.Time `json:"resetTime"`
+	// UsedRatio 服务端直接下发的已用比率（0~1，顶层 usages.limit_Xh/Xd.used_ratio）。
+	// -1 = 未知（旧响应无此字段），展示层回退 Used/Limit 推导。服务端比率免客户端
+	// 浮点推导误差（如 used=22/limit=100 vs 服务端 0.220754）。
+	UsedRatio float64 `json:"usedRatio"`
+}
+
+// UnmarshalJSON 让 usedRatio 字段缺失（旧版磁盘缓存/外部 JSON）时为 -1（未知）
+// 而非零值 0——0 是合法比率，混用会把"未知"错当成"服务端比率 0%"。
+func (w *Window) UnmarshalJSON(data []byte) error {
+	type windowAlias Window
+	raw := windowAlias{UsedRatio: -1}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*w = Window(raw)
+	return nil
 }
 
 // Quota 一次配额快照。
@@ -55,6 +71,12 @@ type Client struct {
 	cachePath       string
 	usagesURL       string
 	httpClient      *http.Client
+
+	// apiKeyLoader 提供长期 API key（config.toml [quota].api_key）。配置了 key 时
+	// /usages 请求一律用 key（不依赖 kimi-code CLI 运行态懒刷新 access_token），
+	// 未配置回退 credentials 文件的 access_token。loader 由 main 注入（可 nil=纯
+	// 旧路径），Client 不拥有其生命周期。
+	apiKeyLoader *APIKeyLoader
 
 	mu    sync.Mutex
 	cache *Quota
@@ -113,6 +135,43 @@ func NewClient(credentialsPath, cachePath string) *Client {
 	}
 }
 
+// SetAPIKeyLoader 注入长期 key 热加载器（main 装配时调用；nil 恢复纯 access_token 路径）。
+func (c *Client) SetAPIKeyLoader(l *APIKeyLoader) {
+	c.mu.Lock()
+	c.apiKeyLoader = l
+	c.mu.Unlock()
+}
+
+// apiKey 返回当前生效凭据（长期 key 优先）。第二返回值 = 是否使用 key。
+// 锁保护 apiKeyLoader 字段（与 SetAPIKeyLoader 并发）。
+func (c *Client) apiKey() (string, bool) {
+	c.mu.Lock()
+	l := c.apiKeyLoader
+	c.mu.Unlock()
+	if l != nil {
+		if k := l.Key(); k != "" {
+			return k, true
+		}
+	}
+	return "", false
+}
+
+// UsingAPIKey 当前是否走长期 key 凭据路径（供展示层区分 401 文案）。
+func (c *Client) UsingAPIKey() bool {
+	_, ok := c.apiKey()
+	return ok
+}
+
+// APIKeyReloadIfChanged 轮询期热加载 [quota].api_key（委托 loader；未注入为 no-op）。
+func (c *Client) APIKeyReloadIfChanged() {
+	c.mu.Lock()
+	l := c.apiKeyLoader
+	c.mu.Unlock()
+	if l != nil {
+		l.ReloadIfChanged()
+	}
+}
+
 // Get 返回有效缓存（fetchedAt 距今 < TTL）；缓存过期时返回 nil 并立即后台刷新。
 func (c *Client) Get(now time.Time) *Quota {
 	c.mu.Lock()
@@ -162,20 +221,8 @@ func (c *Client) RefreshNow() {
 
 // Refresh 同步刷新配额；成功写缓存，失败返回错误（调用方决定降级策略）。
 func (c *Client) Refresh(now time.Time) error {
-	cred, err := c.readCreds()
+	q, err := c.fetchQuota(now)
 	if err != nil {
-		// 凭据缺失/损坏/无 access_token：未登录，删除磁盘缓存（对齐 refreshQuota）。
-		c.recordError(now, err)
-		c.deleteDiskCache()
-		return err
-	}
-	q, err := c.fetch(cred.accessToken, now)
-	if err != nil {
-		// 401/403 且 refresh_token 为空 → 视为登出，删除缓存；有 refresh_token →
-		// 仅 access_token 过期，保留旧缓存等 Kimi CLI 懒刷新（对齐 refreshQuota）。
-		if errors.Is(err, ErrUnauthorized) && cred.refreshToken == "" {
-			c.deleteDiskCache()
-		}
 		c.recordError(now, err)
 		return err
 	}
@@ -186,6 +233,31 @@ func (c *Client) Refresh(now time.Time) error {
 	c.mu.Unlock()
 	writeAtomicJSON(c.cachePath, q)
 	return nil
+}
+
+// fetchQuota 双凭据路由取一次配额。缓存清理副作用（登出/未登录删盘缓存）留在
+// access_token 路径：长期 key 路径 401 语义不同——key 失效与本地凭据文件无关，
+// 只记录错误等下轮重试（key 热加载修复后自动恢复），绝不删缓存。
+func (c *Client) fetchQuota(now time.Time) (*Quota, error) {
+	if key, ok := c.apiKey(); ok {
+		return c.fetch(key, now)
+	}
+	cred, err := c.readCreds()
+	if err != nil {
+		// 凭据缺失/损坏/无 access_token：未登录，删除磁盘缓存（对齐 refreshQuota）。
+		c.deleteDiskCache()
+		return nil, err
+	}
+	q, err := c.fetch(cred.accessToken, now)
+	if err != nil {
+		// 401/403 且 refresh_token 为空 → 视为登出，删除缓存；有 refresh_token →
+		// 仅 access_token 过期，保留旧缓存等 Kimi CLI 懒刷新（对齐 refreshQuota）。
+		if errors.Is(err, ErrUnauthorized) && cred.refreshToken == "" {
+			c.deleteDiskCache()
+		}
+		return nil, err
+	}
+	return q, nil
 }
 
 // deleteDiskCache 清空内存缓存并删除磁盘配额缓存（登出/未登录时清理旧数据）。
@@ -228,7 +300,12 @@ func (c *Client) readCreds() (credInfo, error) {
 // 但无 refresh_token 时 ok=false 却已认证（R1-1 评审指出 display/live 曾误用）。
 // 结果按文件 mtime/size 缓存：详情窗打开期间 buildLive 每 500ms 调用本函数，
 // 命中缓存时仅 os.Stat（轻量）而不再读文件内容，文件变化时才真正重读（R2-2 评审修复）。
+// 配置了长期 API key 时短路返回 OK：凭据有效性由 key 承载，credentials 文件是否
+// 存在已不影响 /usages 成败（kimi-code 未登录也能查额度）。
 func (c *Client) CredentialsState() (CredentialsStatus, bool) {
+	if _, ok := c.apiKey(); ok {
+		return CredentialsOK, false
+	}
 	c.credsMu.Lock()
 	defer c.credsMu.Unlock()
 	mtime, size, statErr := statCredFile(c.credentialsPath)
@@ -326,6 +403,7 @@ func (c *Client) fetch(token string, now time.Time) (*Quota, error) {
 }
 
 // parsePayload 解析 5h/7d 窗口（对齐 parseQuotaPayload + quotaValues + deriveWindowLabel）。
+// 顶层 usages.limit_<n><unit>.used_ratio 是服务端精确比率，按 label 回填到对应窗口。
 func parsePayload(payload map[string]any) []Window {
 	var windows []Window
 
@@ -358,7 +436,31 @@ func parsePayload(payload map[string]any) []Window {
 			}
 		}
 	}
+
+	// usages.limit_5h / limit_7d → used_ratio 回填（key 缺失的窗口不动）。
+	if usages, ok := payload["usages"].(map[string]any); ok {
+		for i := range windows {
+			if r, ok := usedRatio(usages, "limit_"+windows[i].Label); ok {
+				windows[i].UsedRatio = r
+			}
+		}
+	}
 	return windows
+}
+
+// usedRatio 取 usages.<key>.used_ratio（0~1）。>1 视为服务端异常值丢弃
+//（P3-2 评审修复：Ratio() 对服务端值无 clamp，异常值会穿透到前端百分比 >100%），
+// 回退推导路径（推导路径自身有 clamp）。
+func usedRatio(usages map[string]any, key string) (float64, bool) {
+	obj, ok := usages[key].(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	r, ok := num(obj["used_ratio"])
+	if !ok || r < 0 || r > 1 {
+		return 0, false
+	}
+	return r, true
 }
 
 // quotaWindow 从 detail 对象提取 used/limit/reset。
@@ -381,9 +483,10 @@ func quotaWindow(detail map[string]any, label string) (Window, bool) {
 		used = limit
 	}
 	w := Window{
-		Label: label,
-		Used:  used,
-		Limit: limit,
+		Label:     label,
+		Used:      used,
+		Limit:     limit,
+		UsedRatio: -1, // 未知，待顶层 usages.used_ratio 回填
 	}
 	if rem, ok := num(detail["remaining"]); ok {
 		w.Remaining = rem

@@ -51,9 +51,9 @@ func (q *Quota) BestWindow() (Window, bool) {
 		return Window{}, false
 	}
 	best := q.Windows[0]
-	bestFracValue := bestFrac(best)
+	bestFracValue := best.Ratio()
 	for _, w := range q.Windows {
-		if f := bestFrac(w); f > bestFracValue {
+		if f := w.Ratio(); f > bestFracValue {
 			best = w
 			bestFracValue = f
 		}
@@ -66,4 +66,25 @@ func bestFrac(w Window) float64 {
 		return 0
 	}
 	return w.Used / w.Limit
+}
+
+// Ratio 窗口已用比率：服务端下发的 UsedRatio 优先（>0 有效，免客户端浮点推导
+// 误差），否则回退 Used/Limit 推导并 clamp。UsedRatio <= 0 视为未下发（-1 哨兵、
+// 零值结构体、旧版磁盘缓存皆落此分支）；服务端比率为 0 时推导值亦为 0
+//（used = limit-remaining = 0），语义等价无损失。
+func (w Window) Ratio() float64 {
+	if w.UsedRatio > 0 {
+		return w.UsedRatio
+	}
+	return clampFrac(bestFrac(w))
+}
+
+func clampFrac(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
 }

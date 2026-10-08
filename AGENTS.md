@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to suningAiBrowser when working with code in this repository.
+This file provides guidance to Aidex when working with code in this repository.
 
 ## 项目概述
 
@@ -33,7 +33,7 @@ gofmt -l .
 ### 三条相互独立的数据管线，只在展示层合并
 
 1. **实时指标（离线）**：wire 事件日志增量读取 → `internal/session.Manager`（定位最近活跃会话 + 驱动指标状态机）→ `internal/metrics.State`（TPS/TTFT/Cache 状态机 + 舰队汇总）。数据源：`~/.kimi-code/sessions/<wd>/session_*/agents/{main,agent-N}/wire.jsonl`。
-2. **订阅额度（联网）**：`internal/quota.Client` → `GET https://api.kimi.com/coding/v1/usages`（Bearer access_token），TTL 5min 缓存 + 原子写。
+2. **订阅额度（联网）**：`internal/quota.Client` → `GET https://api.kimi.com/coding/v1/usages`，双凭据路由：配置了长期 API key（`~/.kimi-code-hud/config.toml` 的 `[quota].api_key`，`sk-kimi-...`，热加载）时 Bearer 用 key、与 CLI 运行态解耦；未配置回退 credentials 的 access_token（15min 短期，靠 CLI 懒刷新）。TTL 5min 缓存 + 原子写。
 3. **今日用量（离线全量扫描）**：`internal/scan.ScanToday`（today-only 轻量模式）→ `internal/today.Manager`（5min 缓存，跨天 date key 自动重置）。缓存是顶部实时卡"今日总 token"的唯一来源；详情窗"今日"档扫描完成后经 `tm.UpdateFromScan(report, startMs)` **回填缓存**（用户诉求：两处更新时间同步，详见下节）。
 
 三条管线的数据经 `internal/display`（托盘菜单文本 + 图标颜色，`cmd/kimi-hud` 与 `cmd/demo` 共用，避免复制漂移）与 `cmd/kimi-hud/live.go`（WebView2 实时推送 JSON）合并展示。`internal/pricing` 提供官方单价表 + 费用计算（纳元整数运算）与用户配置覆盖。
@@ -67,7 +67,8 @@ gofmt -l .
 - wire 事件 `context.append_loop_event` 的 `event.type=step.end` 含 usage（inputOther/inputCacheRead/inputCacheCreation/output）、llmFirstTokenLatencyMs、llmStreamDurationMs → TPS/TTFT/Cache 唯一来源。
 - `usage.record` 计入 Cache 会双计，实时指标必须忽略（但全量扫描 `internal/scan` 以 usage.record 为准——两套口径并存）。
 - 不存在 `turn.ended` 事件；回合结束靠 step.end 的 `finishReason=end_turn` 标记。
-- access_token 15 分钟过期，刷新端点是私有实现未公开；401 时保留旧缓存等待 Kimi CLI 懒刷新（`~/.kimi-code/bin/kimi.exe`），程序不自行刷新。
+- access_token 15 分钟过期，刷新端点是私有实现未公开；401 时保留旧缓存等待 Kimi CLI 懒刷新（`~/.kimi-code/bin/kimi.exe`），程序不自行刷新。长期 key 路径（`[quota].api_key`）401 = key 失效：同样只记错误不删缓存（key 与本地 credentials 文件无关，热加载修复后自动恢复）。
+- `/usages` 端点同时接受 access_token 与长期 API key（2026-10-08 实测，对齐 cc-switch `query_kimi`）；响应顶层 `usages.limit_5h/limit_7d.used_ratio` 是服务端精确比率，展示层（托盘柱条/图标分级/详情窗/前端）一律走 `Window.Ratio()`：`UsedRatio > 0` 用服务端值，`<= 0` 回退 `Used/Limit` 推导并 clamp（-1 哨兵语义见 quota.go `UnmarshalJSON`——旧磁盘缓存缺该字段时为 -1，不能用 0，0 是合法比率）。
 - 托管 provider 判定：`~/.kimi-code/config.toml` 的 `[models."<alias>"]` 的 `provider = "managed:kimi-code"`；非托管自动隐藏额度段。
 - 用户单价/月费配置在 `~/.kimi-code-hud/config.toml`（`[pricing]`，热加载）；绝不写入 Kimi 的 `~/.kimi-code/config.toml`（其更新会覆盖我们的段）。
 - 参考实现（行为对拍/常量核对用）：`D:\Project\kimi-code-hud-main\src\*.mjs`（Node.js 原版，零依赖）；本项目多数包注释标注了"对齐 xxx.mjs"，改逻辑时对照原版可避免口径漂移。
@@ -99,3 +100,7 @@ gofmt -l .
 - 设计/评审文档在 `doc/`：项目方案（含常量速查对照表）、功能整合方案（M2 WebView2 详情窗口）、WebView2 SPIKE 预研结果、开发过程工具问题记录。
 - 桌面/托盘 GUI 自动化测试用 win-desktop-test skill（枚举窗口/弹托盘菜单/读日志断言）；WebView2 白屏变体诊断用 `cmd/echotest` + `scripts/run_webview_test.bat`；配额 API 校验用 `scripts/verify_quota.py`/`test_quota.py`。
 - 运行时日志：`%USERPROFILE%\.kimi-code-hud\debug.log`（托盘）、同目录 `webview.log`（WebView2 通道）。
+
+## Tool cache directory
+
+`.cache/` is the Aidex tool cache directory (web-fetch page snapshots + web_search results; regenerable, safe to delete at any time). It is git-ignored — exclude it from git add/commit.
