@@ -341,6 +341,10 @@ const configTemplate = `# kimi-hud 配置文件（~/.kimi-code-hud/config.toml�
 #cache_read  = 0.0
 #cache_write = 0.0
 
+# 订阅月费（仅展示在托盘菜单「订阅成本 ¥xx/月」，不参与计费）：
+#[pricing.subscription]
+#monthly_cny = 60.0
+
 `
 
 // ensureConfigTemplate 配置文件缺失时写入全注释模板（已存在绝不覆盖——
