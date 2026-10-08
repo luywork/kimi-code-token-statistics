@@ -323,18 +323,24 @@ const configTemplate = `# kimi-hud 配置文件（~/.kimi-code-hud/config.toml�
 #api_key = "sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # ── 自定义模型单价（可选）────────────────────────────────
-# 单位：元/百万 token。订阅模型（如 kimi-for-coding）无内置单价，
-# 自行配置后"费用"统计才有意义。完整价格表见 doc/成本设置说明.md。
+# 单位：元/百万 token。内置价格表只覆盖 Kimi 官方模型（k3 / k2.7-code /
+# moonshot-v1 等）；订阅模型与第三方模型（GLM / DeepSeek 等）默认无单价、
+# 费用统计为 0，按需配置后"费用"才有意义。
+# 表头 = 用量统计里显示的模型名（支持去前缀短名，大小写不敏感）。
+# 下方数值仅为格式示例，请按你的供应商定价填写。完整说明见 doc/成本设置说明.md。
 
-#[pricing."kimi-for-coding"]
+#[pricing."kimi-for-coding"]      # 订阅模型示例
 #input       = 6.5
 #output      = 26.0
 #cache_read  = 1.3
 #cache_write = 6.5
 
-# 订阅月费（仅展示，不参与计费）：
-#[pricing.subscription]
-#monthly_cny = 60.0
+#[pricing."glm-5.3"]              # 第三方模型示例：表头换成你实际用的模型名
+#input       = 0.0
+#output      = 0.0
+#cache_read  = 0.0
+#cache_write = 0.0
+
 `
 
 // ensureConfigTemplate 配置文件缺失时写入全注释模板（已存在绝不覆盖——
