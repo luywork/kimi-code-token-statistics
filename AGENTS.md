@@ -70,7 +70,7 @@ gofmt -l .
 - access_token 15 分钟过期，刷新端点是私有实现未公开；401 时保留旧缓存等待 Kimi CLI 懒刷新（`~/.kimi-code/bin/kimi.exe`），程序不自行刷新。长期 key 路径（`[quota].api_key`）401 = key 失效：同样只记错误不删缓存（key 与本地 credentials 文件无关，热加载修复后自动恢复）。
 - `/usages` 端点同时接受 access_token 与长期 API key（2026-10-08 实测，对齐 cc-switch `query_kimi`）；响应顶层 `usages.limit_5h/limit_7d.used_ratio` 是服务端精确比率，展示层（托盘柱条/图标分级/详情窗/前端）一律走 `Window.Ratio()`：`UsedRatio > 0` 用服务端值，`<= 0` 回退 `Used/Limit` 推导并 clamp（-1 哨兵语义见 quota.go `UnmarshalJSON`——旧磁盘缓存缺该字段时为 -1，不能用 0，0 是合法比率）。
 - 托管 provider 判定：`~/.kimi-code/config.toml` 的 `[models."<alias>"]` 的 `provider = "managed:kimi-code"`；非托管自动隐藏额度段。
-- 用户单价/月费配置在 `~/.kimi-code-hud/config.toml`（`[pricing]`，热加载）；绝不写入 Kimi 的 `~/.kimi-code/config.toml`（其更新会覆盖我们的段）。
+- 用户单价/月费配置在 `~/.kimi-code-hud/config.toml`（`[pricing]`，热加载）；绝不写入 Kimi 的 `~/.kimi-code/config.toml`（其更新会覆盖我们的段）。**配置文件缺失时启动自动生成全注释模板**（`cmd/kimi-hud/main.go` 的 `ensureConfigTemplate`，含 `[quota].api_key` 与 `[pricing]` 示例；所有行含表头都以 # 开头保证零配置——非注释空表会被解析器当成配置，pricing 会以零值覆盖内置价格表）；已存在绝不覆盖。
 - 参考实现（行为对拍/常量核对用）：`D:\Project\kimi-code-hud-main\src\*.mjs`（Node.js 原版，零依赖）；本项目多数包注释标注了"对齐 xxx.mjs"，改逻辑时对照原版可避免口径漂移。
 
 ### 已知陷阱（已修复，改相关代码前先读这些点）

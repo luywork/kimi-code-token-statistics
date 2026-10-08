@@ -127,7 +127,7 @@ Close the window and you're back to the tray — no background cost while it's c
 
 ## Configuration
 
-kimi-hud keeps its own config at **`~/.kimi-code-hud/config.toml`** (fully isolated from Kimi Code's `~/.kimi-code/config.toml`, which is only ever read, never written). Create the file if it doesn't exist — changes hot-reload on the next refresh cycle.
+kimi-hud keeps its own config at **`~/.kimi-code-hud/config.toml`** (fully isolated from Kimi Code's `~/.kimi-code/config.toml`, which is only ever read, never written). The file is created automatically with a fully-commented template on first start — uncomment any line to enable it; changes hot-reload on the next refresh cycle.
 
 ### Custom model pricing
 
@@ -196,4 +196,6 @@ scripts/            PE/icon checkers, quota API test scripts
 
 - The UI thread (tray message loop + WebView2 COM apartment) is pinned to the main OS thread via `runtime.LockOSThread()`; all COM/window calls must happen there. `metrics.State` has no internal lock and must be accessed under the `stMu` mutex in `main.go`.
 - Behavioral reference: the original zero-dependency Node.js implementation at `D:\Project\kimi-code-hud-main\src\*.mjs` (used to cross-check constants and semantics).
+src\*.mjs` (used to cross-check constants and semantics).
+mantics).
 src\*.mjs` (used to cross-check constants and semantics).

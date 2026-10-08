@@ -151,6 +151,8 @@ monthly_cny = 60.0            # 订阅月费（仅展示，不参与计费）
 
 ### 订阅额度 API key（可选，推荐）
 
+> `config.toml` 首次启动自动生成，自带注释态的 `[quota].api_key` 示例——去掉那两行行首 `#`、填入你的 key 即可。
+
 默认额度查询使用 CLI 的短期 `access_token`（15 分钟过期），Kimi Code CLI 不运行时请求会 401、托盘只能显示旧缓存。可配置**长期 API key**（从 [Kimi For Coding 控制台](https://www.kimi.com/code/)获取，`sk-kimi-...`）彻底解除对 CLI 的依赖：
 
 ```toml

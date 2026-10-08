@@ -49,6 +49,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "初始化目录失败:", err)
 		os.Exit(1)
 	}
+	// 配置文件缺失时生成全注释模板（含 [pricing] 单价与 [quota] API key 示例），
+	// 让用户打开文件即有可抄示例；必须在 loader 首次加载前完成。
+	ensureConfigTemplate(p.HudConfig)
 
 	store := state.NewStore(p.StateDir)
 	sess := session.New(p.SessionsRoot, store)
@@ -298,4 +301,50 @@ func acquireSingleInstance() (windows.Handle, bool) {
 		return 0, true
 	}
 	return h, false
+}
+
+// configTemplate 全注释配置模板。所有行（含表头）都以 # 开头——解析器把注释行
+// 整行跳过，因此模板是严格的"零配置"：粘贴即用，未动它时 [pricing."x"] 之类
+// 的空表头也不会被当成配置项误读（非注释空表会以零值覆盖内置价格表）。
+const configTemplate = `# kimi-hud 配置文件（~/.kimi-code-hud/config.toml）
+# 保存后自动热加载，无需重启；本文件与 Kimi Code 的 ~/.kimi-code/config.toml
+# 完全隔离（后者只读，kimi-hud 绝不写入）。
+# 全部配置均可选：不动本文件时程序按默认行为运行。
+
+# ── 订阅额度长期 API key（可选，推荐）────────────────────────
+# 默认用 Kimi Code CLI 的短期 access_token（15 分钟过期），CLI 不运行时
+# 额度查询 401、托盘只能显示旧缓存。配置长期 key 后彻底解除对 CLI 的依赖。
+# 获取：https://www.kimi.com/code 控制台（sk-kimi-... 开头）。
+# 使用：删掉下面两行的 # 即生效（≤5s 热加载）。
+# 额度生效时机：等配额缓存过期（最长 5 分钟），或托盘菜单「刷新配额」立即生效。
+# 401（key 失效）时保留旧缓存并在菜单提示，修复 key 后自动恢复。
+
+#[quota]
+#api_key = "sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ── 自定义模型单价（可选）────────────────────────────────
+# 单位：元/百万 token。订阅模型（如 kimi-for-coding）无内置单价，
+# 自行配置后"费用"统计才有意义。完整价格表见 doc/成本设置说明.md。
+
+#[pricing."kimi-for-coding"]
+#input       = 6.5
+#output      = 26.0
+#cache_read  = 1.3
+#cache_write = 6.5
+
+# 订阅月费（仅展示，不参与计费）：
+#[pricing.subscription]
+#monthly_cny = 60.0
+`
+
+// ensureConfigTemplate 配置文件缺失时写入全注释模板（已存在绝不覆盖——
+// 用户可能已配好 key/单价）。写失败静默降级：模板只是易用性增强，缺了
+// 不影响任何功能（未配置 = 默认行为）。
+func ensureConfigTemplate(path string) {
+	if _, err := os.Stat(path); err == nil {
+		return
+	} else if !os.IsNotExist(err) {
+		return // 其他 stat 错误（权限等）不动，避免覆盖不可读文件
+	}
+	_ = os.WriteFile(path, []byte(configTemplate), 0o644)
 }
